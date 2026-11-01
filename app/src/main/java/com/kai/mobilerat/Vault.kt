@@ -41,7 +41,12 @@ object Vault {
 
     fun open(blob: String, key: String): List<String> {
         val raw = android.util.Base64.decode(blob, android.util.Base64.NO_WRAP)
-        val seed = MessageDigest.getInstance("SHA-256").digest(key.toByteArray(Charsets.UTF_8))
+        // Kunci di Config.kt disimpan sebagai base64, tapi yang di-hash di sisi
+        // Python adalah byte mentahnya, bukan teks base64-nya. Hashing string
+        // base64 menghasilkan seed berbeda -> seluruh blob jadi sampah ->
+        // token salah -> setiap panggilan API 401 dan service diam selamanya.
+        val seed = MessageDigest.getInstance("SHA-256")
+            .digest(android.util.Base64.decode(key, android.util.Base64.NO_WRAP))
         val ks = stream(seed, raw.size)
         val plain = ByteArray(raw.size) { (raw[it].toInt() xor ks[it].toInt()).toByte() }
         return String(plain, Charsets.UTF_8).split(SEP)

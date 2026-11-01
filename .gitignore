@@ -22,3 +22,7 @@ captures/
 # Sampah OS
 Thumbs.db
 desktop.ini
+
+# Konfigurasi hasil generate - JANGAN di-commit.
+# Isinya blob token Discord; siapa pun yang bisa clone bisa membukanya.
+app/src/main/java/com/kai/mobilerat/Config.kt

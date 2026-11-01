@@ -58,11 +58,28 @@ MobileRAT/
 
 ## Build
 
+`Config.kt` **tidak ada di repo** — sengaja. Isinya blob token Discord; kalau
+di-commit, siapa pun yang meng-clone bisa membukanya dan memakai bot-nya.
+Buat dulu sebelum build:
+
+```powershell
+python tools\genconfig.py --token "<token bot>" --channel <channel id> --alias b
+```
+
+Skrip itu menulis `app\src\main\java\com\kai\mobilerat\Config.kt` (sudah
+di-`.gitignore`) sekaligus menolak selesai kalau token masih muncul plaintext.
+
+Lalu:
+
 ```powershell
 .\tools\build.ps1            # assembleRelease + verifikasi tanda tangan
 .\tools\build.ps1 -Install   # sekalian adb install -r
 .\tools\build.ps1 -Clean     # clean dulu
 ```
+
+Kalau `assembleRelease` gagal dengan *"Failed to delete some children"* di
+folder `~\.gradle\caches\9.6.0\transforms`, itu Android Studio yang memegang
+handle file cache. Tutup Studio (atau `gradle --stop`) lalu ulangi.
 
 Manual, kalau tidak mau lewat skrip:
 
@@ -173,14 +190,28 @@ membunuh service. Tidak ada obat tanpa autostart permission vendor.
 balasan PC (`[a] ...`) dan HP (`[b] ...`) masuk ke channel yang sama. Kalau
 mau benar-benar terpisah, buat bot kedua.
 
-## Yang belum dites
+## Yang sudah dan belum dites
 
-APK **belum pernah dipasang dan dijalankan**. Tidak ada perangkat yang
-tersambung (`adb devices` kosong) dan AVD `Medium_Phone_API_37.0` butuh 12 GB
-untuk partisi userdata sementara C: cuma punya sekitar 4 GB bebas — emulator
-keluar dengan `FATAL | Not enough space to create userdata partition`.
+Sudah terpasang dan dijalankan di perangkat nyata: **SM-X910N, Android 9, SDK 28**
+lewat `adb`. Hasil:
 
-Yang sudah terverifikasi:
+```
+pm install                      Success
+dumpsys activity services        ServiceRecord com.kai.mobilerat/.C2Service
+                                 isForeground=true foregroundId=1
+                                 foregroundServiceType aktif (dataSync)
+ps -A | grep mobilerat            proses hidup, tidak crash
+pm grant (7 permission)          granted
+```
+
+Dari uji itu ketemu bug yang tidak mungkin kelihatan tanpa menjalankan:
+`Vault.open()` menge-hash **teks base64** kuncinya, sementara
+`tools/genconfig.py` menge-hash **byte mentahnya**. Seed berbeda → blob
+ter-decode jadi sampah → token salah → setiap panggilan Discord 401 → service
+hidup tapi diam selamanya, tanpa satu pun exception di logcat. Sudah diperbaiki
+di commit ini.
+
+Terverifikasi statis:
 
 ```
 apksigner verify --print-certs
@@ -197,9 +228,9 @@ classes.dex
   token plaintext: tidak ada
 ```
 
-Yang belum terbukti dan cuma bisa dibuktikan di HP: service benar-benar hidup
-setelah boot, permission dialog muncul, upload attachment sampai, dan
-`screencap` di perangkat tertentu.
+Belum terbukti: service hidup setelah reboot, upload attachment di jaringan
+seluler, dan `screencap` (di Android 9 `screencap` sebagai uid aplikasi tetap
+gagal karena butuh `READ_FRAME_BUFFER`; itu batas OS, bukan bug kode).
 
 ## Riwayat
 

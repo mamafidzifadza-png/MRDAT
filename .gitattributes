@@ -1,0 +1,4 @@
+# Normalisasi line ending supaya diff tidak penuh noise antar mesin.
+* text=auto eol=lf
+*.png binary
+*.jar binary
