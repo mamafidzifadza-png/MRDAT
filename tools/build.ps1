@@ -28,6 +28,23 @@ if (-not (Test-Path $Gradle)) {
 $env:JAVA_HOME = $JavaHome
 $env:PATH = "$JavaHome\bin;$env:PATH"
 
+# local.properties di-ignore git, jadi clone baru tidak punya SDK path dan
+# Gradle mati dengan "SDK location not found". Dibuat otomatis kalau hilang.
+$localProps = Join-Path $root "local.properties"
+if (-not (Test-Path $localProps)) {
+    $sdk = $env:ANDROID_HOME
+    if (-not $sdk) {
+        foreach ($cand in @("$env:LOCALAPPDATA\Android\Sdk", "G:\Software\AndroidSDK")) {
+            if (Test-Path (Join-Path $cand "platform-tools")) { $sdk = $cand; break }
+        }
+    }
+    if (-not $sdk) { throw "SDK Android tidak ketemu; set ANDROID_HOME atau isi local.properties" }
+    # Titik dua di path Windows harus di-escape di file properties.
+    "sdk.dir=" + ($sdk -replace '\\', '\\' -replace '^([A-Za-z]):', '$1\:') |
+        Set-Content -Path $localProps -Encoding ASCII
+    Write-Host "[*] local.properties dibuat: sdk.dir=$sdk"
+}
+
 # Keystore wajib. Tanpa ini APK keluar unsigned dan Android menolaknya.
 if (-not (Test-Path (Join-Path $root "keystore.properties"))) {
     Write-Host "[!] keystore.properties belum ada, menjalankan tools\genkey.ps1"
