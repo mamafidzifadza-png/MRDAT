@@ -1,0 +1,24 @@
+# Gradle / Android
+.gradle/
+build/
+app/build/
+local.properties
+
+# Signing - jangan pernah ikut repo
+*.jks
+*.keystore
+keystore.properties
+
+# Hasil build
+dist/
+
+# IDE
+.idea/
+*.iml
+captures/
+.externalNativeBuild/
+.cxx/
+
+# Sampah OS
+Thumbs.db
+desktop.ini

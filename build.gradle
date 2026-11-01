@@ -1,0 +1,9 @@
+// Root plugin versions. Versi dipatok biar build CLI dan Android Studio
+// menghasilkan APK yang sama; AGP 9.5.0 pasangan Gradle 9.6.
+//
+// Catatan penting: sejak AGP 9.0 dukungan Kotlin sudah bawaan, plugin
+// org.jetbrains.kotlin.android TIDAK boleh dipasang lagi — build gagal dengan
+// "The 'org.jetbrains.kotlin.android' plugin is no longer required".
+plugins {
+    id 'com.android.application' version '9.5.0' apply false
+}

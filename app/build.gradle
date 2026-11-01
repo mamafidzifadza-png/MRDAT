@@ -1,0 +1,77 @@
+plugins {
+    // Kotlin sudah ditangani AGP 9 (built-in Kotlin). Menambahkan plugin
+    // org.jetbrains.kotlin.android di sini justru mematikan build.
+    id 'com.android.application'
+}
+
+// Kredensial keystore dipisah dari repo supaya file ini bisa dibagi tanpa
+// ikut membocorkan kunci signing. tools/genkey.ps1 membuat dua-duanya.
+def ksProps = new Properties()
+def ksFile = rootProject.file('keystore.properties')
+if (ksFile.exists()) {
+    ksFile.withInputStream { ksProps.load(it) }
+}
+
+android {
+    namespace 'com.kai.mobilerat'
+    compileSdk 37
+    buildToolsVersion '36.0.0'
+
+    defaultConfig {
+        applicationId "com.kai.mobilerat"
+        minSdk 24
+        // targetSdk 29 sengaja: di bawah 30 aplikasi masih boleh pakai
+        // requestLegacyExternalStorage, jadi /sdcard bisa dibaca-tulis tanpa
+        // dialog "All files access" yang mencurigakan. Android 14 hanya
+        // memblokir pemasangan di bawah targetSdk 23, jadi 29 tetap aman.
+        targetSdk 29
+        versionCode 2
+        versionName "1.1"
+    }
+
+    signingConfigs {
+        release {
+            if (ksFile.exists()) {
+                storeFile rootProject.file(ksProps['storeFile'])
+                storePassword ksProps['storePassword']
+                keyAlias ksProps['keyAlias']
+                keyPassword ksProps['keyPassword']
+            }
+        }
+    }
+
+    buildTypes {
+        debug {
+            minifyEnabled false
+        }
+        release {
+            // Tanpa signingConfig, assembleRelease menghasilkan APK unsigned
+            // dan Android menolak memasangnya (INSTALL_PARSE_FAILED_NO_CERTIFICATES).
+            if (ksFile.exists()) {
+                signingConfig signingConfigs.release
+            }
+            minifyEnabled true
+            shrinkResources true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    packagingOptions {
+        resources.excludes += ['META-INF/*.kotlin_module']
+    }
+
+    lint {
+        abortOnError false
+        checkReleaseBuilds false
+    }
+}
+
+dependencies {
+    // Satu-satunya dependensi: ServiceCompat buat startForeground bertipe.
+    implementation 'androidx.core:core-ktx:1.13.1'
+}
