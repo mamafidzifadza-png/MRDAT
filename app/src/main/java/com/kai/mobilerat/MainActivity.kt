@@ -57,7 +57,24 @@ class MainActivity : Activity() {
         } catch (_: Exception) {
         }
         askBattery()
+        askOverlay()
         finish()
+    }
+
+    /**
+     * `black` dan `block` butuh izin overlay. Izin ini tidak punya dialog
+     * runtime — satu-satunya jalan adalah layar Settings, jadi dibuka sekali
+     * di sini dan sisanya diserahkan ke pemilik perangkat.
+     */
+    private fun askOverlay() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return
+        try {
+            if (Settings.canDrawOverlays(this)) return
+            startActivity(
+                Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName"))
+            )
+        } catch (_: Exception) {
+        }
     }
 
     private fun askBattery() {

