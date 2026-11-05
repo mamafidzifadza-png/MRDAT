@@ -100,8 +100,13 @@ di-build dari CLI.
 ## Ganti token / uuid / alias
 
 ```powershell
-python tools\genconfig.py --token "<token>" --channel <id> --alias b
+python tools\genconfig.py --token "<token>" --channel <id>
 ```
+
+Alias kosong = ditentukan saat jalan dari codename perangkat (`Build.DEVICE`,
+mis. `ginkgo` → `!gink`). Isi `--alias b` hanya kalau memang mau nama tetap.
+Dulu alias selalu dibakar `b`, jadi dua HP di channel yang sama menjawab `!b`
+sekaligus dan tidak ada cara memilih satu.
 
 UUID dibuat acak kalau tidak diberi `--uuid`. Skrip menolak menyelesaikan
 pekerjaan kalau token masih muncul plaintext di `Config.kt`.
@@ -113,12 +118,21 @@ string utuh `MTU2NDIx...` tidak ada di APK. Sudah diverifikasi dengan membongkar
 
 ## Perintah
 
-Semua butuh prefix: `!b <cmd>`, `b <cmd>`, `!<uuid> <cmd>`, atau `!* <cmd>`.
+Prefix yang diterima:
+
+| bentuk | arti |
+|---|---|
+| `!gink shot` | alias perangkat (otomatis dari codename) |
+| `!d91f3619 shot` | uuid8 |
+| `!@redmi shot` | pola codename / uuid8 / model mengandung `redmi` |
+| `!* who` | semua perangkat menjawab sekaligus |
+
 Tanpa prefix diabaikan diam-diam — versi lama menjawab `UNKNOWN` ke setiap
 obrolan di channel.
 
 | perintah | keterangan |
 |---|---|
+| `who` / `id` | kartu identitas: uuid8, model, android, versi + sha8 APK, uptime, baterai |
 | `info` | model, sdk, cwd, baterai, status storage, jumlah permission kurang |
 | `sys` | info lengkap: uptime, layar, RAM, security patch, fingerprint |
 | `ping` | latensi ke API Discord (ms + kode HTTP) |

