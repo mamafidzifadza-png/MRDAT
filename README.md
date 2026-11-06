@@ -146,7 +146,7 @@ obrolan di channel.
 | `cam [front\|back]` | foto kamera → attachment, tanpa preview |
 | `mic [detik]` | rekam mikrofon → WAV, maks 120 detik |
 | `clip [teks]` | baca / tulis clipboard |
-| `ps` / `kill <pid\|package>` | proses |
+| `ps` / `kill <pid\|package>` | daftar proses (`ps -A`; penuh kalau ada root, tanpa root hanya uid sendiri) / matikan proses atau paket |
 | `msg` / `toast <teks>` | toast di layar |
 | `notify <judul>\|<isi>` | notifikasi di shade |
 | `tts <teks>` | suara TextToSpeech di HP |
