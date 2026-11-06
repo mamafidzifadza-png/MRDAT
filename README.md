@@ -163,6 +163,14 @@ obrolan di channel.
 | `close` | tutup overlay dan player |
 | `open <url>` | buka URL di browser bawaan |
 | `inst <url\|path>` | unduh + dialog pasang APK |
+| `x <url>` | unduh; kalau `.apk` langsung diserahkan ke installer |
+| `update` | ringkasan build yang berjalan: path, ukuran, sha256, versi |
+| `update <url> [sha256]` | unduh APK, verifikasi sha, lalu pasang; sha salah = file dihapus |
+| `uninstall` | hapus diri sendiri: root = tanpa dialog, tanpa root = dialog paket |
+| `persist` / `unpersist` | alias `boot on` / `boot off` |
+| `taskkill <pid\|package>` | alias `kill` |
+| `keys on\|off\|dump` | alias `keylog` |
+| `power reboot\|shutdown` | alias `reboot` |
 | `wifi` | SSID, IP, sinyal; profil tersimpan butuh root |
 | `root` | cek `su`, uid, SELinux |
 | `reboot [now\|shutdown\|recovery\|bootloader]` | butuh root |
