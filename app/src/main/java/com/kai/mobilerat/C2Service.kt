@@ -398,7 +398,8 @@ class C2Service : Service() {
                 "build  : ${pkg?.versionName ?: "?"}   $size   sha ${apkSha(apk)}\n" +
                 "pkg    : $packageName\n" +
                 "proc   : pid ${Process.myPid()}   up " +
-                uptimeText(SystemClock.elapsedRealtime() / 1000) + "\n" +
+                uptimeText((SystemClock.elapsedRealtime() - Process.getStartElapsedRealtime()) / 1000) +
+                "   (hp up ${uptimeText(SystemClock.elapsedRealtime() / 1000)})\n" +
                 "batt   : $pct%   perm kurang ${Perms.missing(this).size}\n" +
                 "alamat : !$deviceTag   !${Config.uuid.take(8)}   !@$deviceTag"
         )
